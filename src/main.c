@@ -3,6 +3,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+#define STATS_PATH "/tmp/stats.dat"
 
 static void on_tick(unsigned n, void *userdata)
 {
@@ -34,23 +37,33 @@ static void print_stats(const stats_t *s)
 
 int main(void)
 {
-	tracker_t *t = tracker_create();
 	int status;
-	
+	tracker_t *t = tracker_create();
+
 	if (t == NULL)
 	{
-		printf("Erreur création tracker\n");
+		fprintf(stderr, "creation tracker");
 		return EXIT_FAILURE;
 	}
 	
+	if (tracker_load(t, STATS_PATH) == -1)
+	{
+		fprintf(stderr, "tracker_load");
+		tracker_destroy(t);
+		return EXIT_FAILURE;
+	}
+
 	status = ticker_run(10, on_tick, t);
+
+	if (tracker_save(t, STATS_PATH) == -1)
+	{
+		fprintf(stderr, "tracker_save");
+		status = -1;
+	}
+	
 	print_stats(tracker_stats(t));
+
 	tracker_destroy(t);
 	
-	if (status == -1)
-	{
-		return EXIT_FAILURE;
-	}
-	
-	return EXIT_SUCCESS;
+	return (status == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

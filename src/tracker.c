@@ -3,9 +3,10 @@
 #include "proc_info.h"
 #include "stats.h"
 #include "x11_probe.h"
-#include "proc_info.h"
+#include "storage.h"
 
 #include <stdlib.h>
+#include <errno.h>
 
 struct tracker
 {
@@ -76,12 +77,7 @@ int tracker_tick(tracker_t *t)
         return -1;
     }
     
-    if (status != 0)
-    {
-        return (status == 1) ? 0 : -1;
-    }
-    
-    if (proc_info_get_name(pid, name, sizeof name) == 1)
+    if (proc_info_get_name(pid, name, sizeof name) == -1)
     {
         return 0;
     }
@@ -97,4 +93,26 @@ const stats_t *tracker_stats(const tracker_t *t)
     }
     
     return t->stats;
+}
+
+int tracker_load(tracker_t *t, const char *path)
+{
+    if (t == NULL)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    
+    return storage_load(t->stats, path);
+}
+
+int tracker_save(const tracker_t *t, const char *path)
+{        
+        if (t == NULL)
+        {
+            errno = EINVAL;
+            return -1;
+        }
+        
+        return storage_save(t->stats, path);
 }

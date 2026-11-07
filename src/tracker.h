@@ -21,4 +21,14 @@ int tracker_tick(tracker_t *t);
 /* Accès en lecture seule à la table, valide jusqu'à tracker_destroy. */
 const stats_t *tracker_stats(const tracker_t *t);
 
+/* Charge le fichier path dans la table du tracker (les secondes
+ * s'ajoutent à l'existant). Fichier absent : retourne 0.
+ * Retourne 0 si OK, -1 si erreur d'E/S ou d'allocation. */
+int tracker_load(tracker_t *t, const char *path);
+
+
+/* Sauvegarde la table du tracker dans path (écriture atomique).
+ * Retourne 0 si OK, -1 sinon (errno positionné). */
+int tracker_save(const tracker_t *t, const char *path);
+
 #endif
