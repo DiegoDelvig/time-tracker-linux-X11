@@ -73,7 +73,3 @@ nom : bash -> 2
 - This project depends on X11 and is intended for Linux/X11 desktop environments.
 - The logic treats the active application's process name as a key, so usage is grouped by app name rather than by window title.
 - The code currently focuses on a lightweight, dependency-minimal implementation rather than a full UI.
-
-## License
-
-This repository does not currently declare an explicit license in the project files. If you plan to reuse or distribute it, check the repository metadata or ask the author before using it in a public project.
