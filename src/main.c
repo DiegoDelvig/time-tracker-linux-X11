@@ -10,6 +10,13 @@
 #include <string.h>
 
 #define STATS_PATH "/tmp/stats.dat"
+#define SAVE_INTERVAL 5u
+
+typedef struct
+{
+    tracker_t *t;
+    const char *path;
+} app_t;
 
 static volatile sig_atomic_t g_stop = 0;
 
@@ -37,17 +44,20 @@ static int install_handlers(void)
 
 static void on_tick(unsigned n, void *userdata) 
 {
-  tracker_t *t = userdata;
-  int status;
+    app_t *app = userdata;
 
-  (void)n;
+    if (tracker_tick(app->t) == -1)
+    {
+        fprintf(stderr, "tracker_tick\n");
+    }
 
-  status = tracker_tick(t);
-
-  if (status == -1) 
-  {
-    fprintf(stderr, "erreur");
-  }
+    if (n % SAVE_INTERVAL == 0)
+    {
+        if (tracker_save(app->t, app->path) == -1)
+        {
+            fprintf(stderr, "tracker_save\n");
+        }
+    }
 }
 
 static void print_stats(const stats_t *s) 
@@ -88,11 +98,12 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-    status = ticker_run_until(&g_stop, on_tick, t);
+    app_t app = { t, STATS_PATH };
+    status = ticker_run_until(&g_stop, on_tick, &app);
 
     if (tracker_save(t, STATS_PATH) == -1) 
     {
-      strerror(errno);
+      fprintf(stderr, "tracker_save %s\n", strerror(errno));
       status = -1;
     }
 
