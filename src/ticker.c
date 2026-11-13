@@ -15,4 +15,23 @@ int ticker_run(unsigned count, ticker_cb on_tick, void *userdata)
 	}
 	return 0;
 }
+
+int ticker_run_until(const volatile sig_atomic_t *stop, ticker_cb on_tick, void *userdata)
+{
+	unsigned n = 1;
+
+ 	if (stop == NULL || on_tick == NULL)
+	{
+		return -1;
+	}
+
+	while (!*stop)
+	{
+		on_tick(n, userdata);
+		n++;
+		sleep(1);
+	}
+
+	return 0;
+}
 	

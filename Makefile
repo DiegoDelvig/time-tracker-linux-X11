@@ -1,5 +1,5 @@
 CC      = gcc
-CFLAGS  = -Wall -Wextra -Wpedantic -g -std=c11 -MMD -MP -Isrc
+CFLAGS  = -Wall -Wextra -Wpedantic -g -std=c11 -D_POSIX_C_SOURCE=200809L -MMD -MP -Isrc
 LDLIBS  = -lX11
 BUILD   = build
 
