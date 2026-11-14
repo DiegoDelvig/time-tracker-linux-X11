@@ -1,12 +1,11 @@
 # ============================================================
 #  timetracker : Makefile
-#    make        compile le daemon  -> build/tracker
+#    make        compile le daemon (build/tracker) et le client (build/tracker-ui)
 #    make test   compile et lance les tests sous valgrind
-#    make run    compile puis lance le daemon
+#    make run    compile puis lance le daemon au premier plan
 #    make clean  supprime build/
 # ============================================================
 
-# La cible par défaut est explicite : l'ordre des règles ne compte plus.
 .DEFAULT_GOAL := all
 
 # --- 1. Configuration -------------------------------------------------
@@ -19,20 +18,32 @@ BUILD   := build
 
 # --- 2. Fichiers ------------------------------------------------------
 
-SRCS  := $(wildcard src/*.c)
-OBJS  := $(SRCS:src/%.c=$(BUILD)/%.o)
-DEPS  := $(OBJS:.o=.d)
+SRCS := $(wildcard src/*.c)
+OBJS := $(SRCS:src/%.c=$(BUILD)/%.o)
+DEPS := $(OBJS:.o=.d)
+
+# Chaque exécutable liste SES modules : un seul main par programme.
+DAEMON_OBJS := $(addprefix $(BUILD)/, daemon_main.o paths.o proc_info.o \
+               stats.o storage.o ticker.o tracker.o x11_probe.o)
+UI_OBJS     := $(addprefix $(BUILD)/, ui_main.o paths.o stats.o \
+               storage.o render.o)
 
 TESTS := $(BUILD)/test_stats \
          $(BUILD)/test_storage \
-         $(BUILD)/test_paths
+         $(BUILD)/test_paths \
+         $(BUILD)/test_render
 
-# --- 3. Programme -----------------------------------------------------
+# --- 3. Programmes ----------------------------------------------------
 
-all: $(BUILD)/tracker
+all: $(BUILD)/tracker $(BUILD)/tracker-ui
 
-$(BUILD)/tracker: $(OBJS)
+# Le daemon seul a besoin de X11.
+$(BUILD)/tracker: $(DAEMON_OBJS)
 	$(CC) $^ -o $@ $(LDLIBS)
+
+# Le client n'a aucune dépendance X11.
+$(BUILD)/tracker-ui: $(UI_OBJS)
+	$(CC) $^ -o $@
 
 # Un .c de src/ -> un .o (régénéré si un header inclus change, grâce aux .d)
 $(BUILD)/%.o: src/%.c | $(BUILD)
@@ -41,7 +52,7 @@ $(BUILD)/%.o: src/%.c | $(BUILD)
 $(BUILD):
 	mkdir -p $@
 
-run: all
+run: $(BUILD)/tracker
 	./$(BUILD)/tracker
 
 # --- 4. Tests ---------------------------------------------------------
@@ -55,6 +66,7 @@ $(BUILD)/test_%: tests/test_%.c | $(BUILD)
 $(BUILD)/test_stats:   $(BUILD)/stats.o
 $(BUILD)/test_storage: $(BUILD)/storage.o $(BUILD)/stats.o
 $(BUILD)/test_paths:   $(BUILD)/paths.o
+$(BUILD)/test_render:  $(BUILD)/render.o $(BUILD)/stats.o
 
 test: $(TESTS)
 	@for t in $(TESTS); do \
