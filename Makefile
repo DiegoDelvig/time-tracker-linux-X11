@@ -7,7 +7,10 @@ SRCS := $(wildcard src/*.c)
 OBJS := $(SRCS:src/%.c=$(BUILD)/%.o)
 DEPS := $(OBJS:.o=.d)
 
-TESTS = $(BUILD)/test_stats $(BUILD)/test_storage
+TESTS = $(BUILD)/test_stats $(BUILD)/test_storage $(BUILD)/test_paths
+
+$(BUILD)/test_paths: tests/test_paths.c $(BUILD)/paths.o | $(BUILD) 
+	$(CC) $(CFLAGS) $^ -o $@
 
 all: $(BUILD)/tracker
 
