@@ -1,0 +1,12 @@
+[Unit]
+Description=Time tracker (temps passé par application)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/data/Projects/timetracker/build/tracker
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

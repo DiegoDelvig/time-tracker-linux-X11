@@ -53,17 +53,6 @@ static void on_tick(unsigned n, void *userdata) {
   }
 }
 
-static void print_stats(const stats_t *s) {
-  size_t i;
-
-  for (i = 0; i < stats_count(s); i++) {
-    const char *sna = stats_name_at(s, i);
-    unsigned long ssa = stats_seconds_at(s, i);
-
-    printf("nom : %s -> %lu\n", sna, ssa);
-  }
-}
-
 int main(void) {
     tracker_t *t;
     app_t app;
@@ -102,7 +91,7 @@ int main(void) {
         status = -1;
     }
 
-    print_stats(tracker_stats(t));
     tracker_destroy(t);
+    fprintf(stderr, "arret propre\n");
     return (status == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
