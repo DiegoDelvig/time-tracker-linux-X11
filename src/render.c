@@ -1,12 +1,15 @@
 #include "render.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #define MIN_WIDTH  40
 #define MIN_BAR    10
 #define NAME_COL   16   /* noms de /proc/<pid>/comm : 15 caractères max */
 #define DUR_COL    8
+#define MIN_PERCENT 1
+
 /* Colonnes hors jauge : nom + espace + 2 espaces + durée + espace + "100%" */
 #define FIXED_COLS (NAME_COL + 1 + 2 + DUR_COL + 1 + 4)
 #define MAX_BAR 50
@@ -70,6 +73,7 @@ int render_jauges(FILE *out, const stats_t *s, unsigned width)
 	size_t n;
 	size_t i;
 	size_t k;
+    size_t shown = 0;
 	unsigned long total = 0;
 	unsigned long max;
 	unsigned bar;
@@ -131,6 +135,11 @@ int render_jauges(FILE *out, const stats_t *s, unsigned width)
 		if (total > 0)
 		{
 			pct = rows[i].seconds * 100 / total;
+            if (pct < MIN_PERCENT)
+            {
+                continue;
+            }
+            shown++;
 		}
 		if (render_duration(rows[i].seconds, dur, sizeof dur) == -1)
 		{
@@ -141,6 +150,10 @@ int render_jauges(FILE *out, const stats_t *s, unsigned width)
 		for (k = 0; k < bar; k++)
 		{
 			fputs((k < filled) ? "\xE2\x96\x88" : "\xE2\x96\x91", out); /* █ ░ */
+            if (shown == 0)
+            {
+                fputs("Aucune donne. \n", out);
+            }
 		}
 		fprintf(out, "  %*s %3lu%%\n", DUR_COL, dur, pct);
 	}

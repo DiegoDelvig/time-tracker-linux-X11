@@ -1,5 +1,5 @@
-#include "render.h"
-#include "stats.h"
+#include "../src/render.h"
+#include "../src/stats.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -76,7 +76,7 @@ static void test_sorted_and_content(void)
 	char *p_small;
 
 	assert(s != NULL);
-	assert(stats_add(s, "petit", 10) == 0);
+	assert(stats_add(s, "petit", 100) == 0);
 	assert(stats_add(s, "gros", 3600) == 0);
 	assert(stats_add(s, "moyen", 600) == 0);
 
@@ -115,7 +115,7 @@ static void test_widths_and_zero(void)
 	{
 		out = render_to_string(s, w, &ret);
 		assert(ret == 0);
-		assert(count_lines(out) == 2);
+		assert(count_lines(out) == 1);
 		free(out);
 	}
 
@@ -127,7 +127,7 @@ static void test_widths_and_zero(void)
 	assert(stats_add(s, "zero", 0) == 0);
 	out = render_to_string(s, 80, &ret);
 	assert(ret == 0);
-	assert(strstr(out, "0%") != NULL);
+	assert(strstr(out, "Aucune donne.") != NULL);
 	free(out);
 	stats_destroy(s);
 }
