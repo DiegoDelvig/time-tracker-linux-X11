@@ -1,6 +1,6 @@
 # Time Tracker
 
-Petit démon Linux en C qui mesure le temps passé sur chaque application, accompagné d’un client en terminal pour consulter les statistiques.
+Petit daemon Linux en C qui mesure le temps passé sur chaque application, accompagné d’un client en terminal pour consulter les statistiques.
 
 ```text
 Application active : brave
@@ -34,7 +34,7 @@ Le projet se compose de deux programmes indépendants qui échangent par un fich
 
 ```mermaid
 flowchart LR
-    subgraph daemon["Démon : tracker (chaque seconde)"]
+    subgraph daemon["daemon : tracker (chaque seconde)"]
         x11["Fenêtre X11 active"] --> pid["PID de la fenêtre"]
         pid --> proc["Nom du processus via /proc"]
         proc --> stats["Ajout du temps aux statistiques"]
@@ -46,7 +46,7 @@ flowchart LR
 ```
 
 - **`tracker`** interroge X11 chaque seconde pour identifier la fenêtre au premier plan. Il récupère son PID, lit son nom dans `/proc/<pid>/comm` et comptabilise le temps par application.
-- Les statistiques sont sauvegardées toutes les 60 secondes et à l’arrêt normal du démon (`SIGTERM` ou `SIGINT`). Elles sont conservées entre les lancements.
+- Les statistiques sont sauvegardées toutes les 60 secondes et à l’arrêt normal du daemon (`SIGTERM` ou `SIGINT`). Elles sont conservées entre les lancements.
 - **`tracker-ui`** lit le fichier de données et affiche les statistiques sous forme de jauges. Il ne dépend pas de X11.
 
 ## Prérequis
@@ -56,7 +56,7 @@ flowchart LR
 | Système | Linux (développé sous Ubuntu) |
 | Session graphique | X11 / Xorg |
 | Compilation | GCC compatible C11 et GNU Make |
-| Bibliothèque | Xlib (`libx11-dev`), nécessaire au démon uniquement |
+| Bibliothèque | Xlib (`libx11-dev`), nécessaire au daemon uniquement |
 | Tests | Valgrind |
 | Service utilisateur | systemd |
 
@@ -81,7 +81,7 @@ Depuis la racine du dépôt :
 ```bash
 make        # compile build/tracker et build/tracker-ui
 make test   # compile les tests et les exécute sous Valgrind
-make run    # compile puis lance le démon au premier plan
+make run    # compile puis lance le daemon au premier plan
 make clean  # supprime le dossier build/
 ```
 
@@ -91,7 +91,7 @@ Les options de compilation comprennent `-Wall -Wextra -Wpedantic -g -std=c11`. L
 
 ## Installation comme service
 
-Le service systemd utilisateur lance le démon à l’ouverture de la session graphique ; aucun `sudo` n’est requis pour ces commandes.
+Le service systemd utilisateur lance le daemon à l’ouverture de la session graphique ; aucun `sudo` n’est requis pour ces commandes.
 
 ### 1. Créer le fichier de service
 
@@ -116,7 +116,7 @@ Remplacez `ExecStart` par le chemin absolu vers le binaire `build/tracker` sur v
 
 ### 2. Vérifier l’environnement graphique
 
-Le démon a besoin de la variable `DISPLAY` pour se connecter à X11 :
+Le daemon a besoin de la variable `DISPLAY` pour se connecter à X11 :
 
 ```bash
 systemctl --user show-environment | grep -E 'DISPLAY|XAUTHORITY'
@@ -136,7 +136,7 @@ systemctl --user enable --now timetracker.service
 systemctl --user status timetracker.service
 ```
 
-L’état attendu est `active (running)`. `Restart=on-failure` demande à systemd de relancer le démon après une sortie en erreur, avec une attente de cinq secondes.
+L’état attendu est `active (running)`. `Restart=on-failure` demande à systemd de relancer le daemon après une sortie en erreur, avec une attente de cinq secondes.
 
 ## Afficher les statistiques à l’ouverture du terminal
 
@@ -165,13 +165,13 @@ journalctl --user-unit timetracker.service -n 20 --no-pager
 cat "${XDG_DATA_HOME:-$HOME/.local/share}/timetracker/stats.dat"
 ```
 
-Après recompilation, redémarrez le service : un processus déjà lancé continue d’utiliser l’ancien binaire chargé en mémoire. Ne lancez pas `./build/tracker` manuellement pendant que le service tourne : les deux démons écriraient dans le même fichier.
+Après recompilation, redémarrez le service : un processus déjà lancé continue d’utiliser l’ancien binaire chargé en mémoire. Ne lancez pas `./build/tracker` manuellement pendant que le service tourne : les deux daemons écriraient dans le même fichier.
 
 Le client affiche l’état de la dernière sauvegarde. Les chiffres peuvent donc avoir jusqu’à une minute de retard.
 
 ## Configuration et données
 
-Le projet ne possède pas de fichier de configuration. Les réglages sont définis dans le code ; après modification, recompilez et redémarrez le démon si nécessaire.
+Le projet ne possède pas de fichier de configuration. Les réglages sont définis dans le code ; après modification, recompilez et redémarrez le daemon si nécessaire.
 
 | Constante | Fichier | Rôle | Valeur par défaut |
 | --- | --- | --- | --- |
@@ -194,7 +194,7 @@ time-tracker-linux-X11/
 ├── packaging/
 │   └── timetracker.service
 ├── src/
-│   ├── daemon_main.c       # démon : assemblage, signaux et boucle
+│   ├── daemon_main.c       # daemon : assemblage, signaux et boucle
 │   ├── ui_main.c           # client terminal
 │   ├── x11_probe.[ch]      # identification de la fenêtre active (X11)
 │   ├── proc_info.[ch]      # lecture du nom du processus dans /proc
@@ -229,7 +229,7 @@ flowchart TD
     render --> stats
 ```
 
-Les dépendances vont dans un seul sens, sans cycle. Seul le démon est lié à Xlib ; `tracker-ui` peut fonctionner sans serveur X11.
+Les dépendances vont dans un seul sens, sans cycle. Seul le daemon est lié à Xlib ; `tracker-ui` peut fonctionner sans serveur X11.
 
 ### Responsabilités principales
 
@@ -246,7 +246,7 @@ Les dépendances vont dans un seul sens, sans cycle. Seul le démon est lié à 
 | `daemon_main` | Installe les gestionnaires `SIGINT`/`SIGTERM`, charge les données, démarre la boucle et sauvegarde à l’arrêt. |
 | `ui_main` | Charge les données, détecte la largeur du terminal et appelle le rendu. |
 
-### Cycle de vie du démon
+### Cycle de vie du daemon
 
 ```text
 Calcul du chemin des données
@@ -287,8 +287,8 @@ La sauvegarde est atomique : le contenu est écrit dans `stats.dat.tmp`, puis le
 | --- | --- | --- |
 | `make` ne crée pas les exécutables | Compilation interrompue ou outils manquants | Vérifiez la sortie de `make`, puis installez GCC, Make et `libx11-dev`. |
 | `*** missing separator` | Espaces au lieu d’une tabulation dans le Makefile | Utilisez une vraie tabulation pour les commandes Make. |
-| `undefined reference to XOpenDisplay` | Bibliothèque X11 absente à l’édition de liens | Vérifiez que `libx11-dev` est installé et que le lien du démon utilise `-lX11`. |
-| Le démon ne peut pas se connecter à X | `DISPLAY` absent, ou session Wayland | Vérifiez `echo "$DISPLAY"` et `echo "$XDG_SESSION_TYPE"`, puis importez `DISPLAY` dans l’environnement systemd utilisateur. |
+| `undefined reference to XOpenDisplay` | Bibliothèque X11 absente à l’édition de liens | Vérifiez que `libx11-dev` est installé et que le lien du daemon utilise `-lX11`. |
+| Le daemon ne peut pas se connecter à X | `DISPLAY` absent, ou session Wayland | Vérifiez `echo "$DISPLAY"` et `echo "$XDG_SESSION_TYPE"`, puis importez `DISPLAY` dans l’environnement systemd utilisateur. |
 | Les chiffres ne changent pas | Service arrêté ou sauvegarde périodique pas encore effectuée | Vérifiez `systemctl --user status timetracker.service` et patientez jusqu’à 60 secondes. |
 | Le comportement ne change pas après `make` | Le service utilise encore le binaire chargé précédemment | Exécutez `systemctl --user restart timetracker.service`. |
 | Le service échoue après `make clean` | Le binaire a été supprimé | Relancez `make`, puis redémarrez le service. |
@@ -300,14 +300,14 @@ La sauvegarde est atomique : le contenu est écrit dans `stats.dat.tmp`, puis le
 - **Noms de processus limités :** `/proc/<pid>/comm` est limité à 15 caractères par le noyau.
 - **Certaines applications ne sont pas comptées :** leur fenêtre peut ne pas exposer `_NET_WM_PID`, notamment dans certains environnements sandboxés.
 - **Pas de détection d’inactivité :** le temps continue d’être compté lorsqu’une fenêtre garde le focus, même si l’utilisateur est absent ou que l’écran est verrouillé.
-- **Pas de verrou inter-processus :** deux démons lancés en même temps peuvent écrire dans le même fichier.
+- **Pas de verrou inter-processus :** deux daemons lancés en même temps peuvent écrire dans le même fichier.
 - **Retard et perte possibles :** l’affichage peut avoir jusqu’à 60 secondes de retard ; une terminaison forcée peut faire perdre les données depuis la dernière sauvegarde.
 - **Horloge approximative :** un tick repose sur `sleep(1)` et ne corrige pas la dérive.
 
 ## Pistes d’évolution
 
 - [ ] Ajouter `make install` pour installer les binaires dans `~/.local/bin`.
-- [ ] Ajouter un verrou (`flock`) pour empêcher plusieurs démons simultanés.
+- [ ] Ajouter un verrou (`flock`) pour empêcher plusieurs daemons simultanés.
 - [ ] Remplacer le fichier par une socket Unix pour obtenir des statistiques en direct.
 - [ ] Ajouter la détection d’inactivité.
 - [ ] Mieux gérer les erreurs X11 liées aux fenêtres qui disparaissent.
