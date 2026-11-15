@@ -1,288 +1,320 @@
-timetracker
+# Time Tracker
 
-Un petit démon en C pour Linux/X11 qui mesure le temps passé sur chaque application, et un client qui affiche le résultat sous forme de jauges dans le terminal.
+Petit démon Linux en C qui mesure le temps passé sur chaque application, accompagné d’un client en terminal pour consulter les statistiques.
 
-brave            ██████████████████████████████████████████████████   37m 08s  33%
-wezterm-gui      ██████████████████████████████████░░░░░░░░░░░░░░░░   26m 32s  23%
-systemsettings   █████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   16m 33s  14%
-firefox-bin      ████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   15m 58s  14%
-plasmashell      ████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    6m 34s   5%
-dolphin          █░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    1m 19s   1%
+```text
+Application active : brave
+Temps enregistré   : 37 min 08 s
+Part du temps suivi : 33 %
+```
 
-Le projet a deux objectifs : être utile au quotidien, et servir de support d'apprentissage de la programmation système bas niveau en C (syscalls, /proc, Xlib, signaux, fichiers, mémoire dynamique, daemon systemd) avec une architecture modulaire et testée.
+Le projet a deux objectifs : fournir un outil utile au quotidien et servir de support d’apprentissage de la programmation système en C (appels système, `/proc`, Xlib, signaux, fichiers et mémoire dynamique).
 
-Sommaire
-Fonctionnement
-Prérequis
-Compilation et tests
-Installation comme service
-Affichage à l'ouverture d'un terminal
-Utilisation au quotidien
-Configuration
-Architecture du code
-Format du fichier de données
-Principes de conception
-Dépannage
-Limites connues
-Pistes d'évolution
-Fonctionnement
+> **Compatibilité :** Linux avec une session graphique X11. Wayland n’est pas pris en charge.
 
-Deux programmes indépendants communiquent par un fichier :
+## Sommaire
 
-┌───────────────────────────────┐          ┌─────────────────────────┐
-│ tracker  (démon)              │          │ tracker-ui  (client)    │
-│                               │          │                         │
-│ chaque seconde :              │          │ à la demande :          │
-│  1. X11 : fenêtre active ?    │          │  1. lit stats.dat       │
-│  2. PID de cette fenêtre      │  écrit   │  2. trie par durée      │
-│  3. /proc/<pid>/comm → nom    │ ───────► │  3. dessine les jauges  │
-│  4. +1 seconde pour ce nom    │ stats.dat│     ANSI/UTF-8, adaptées│
-│                               │ ◄─────── │     à la largeur du     │
-│ toutes les 60 s et à l'arrêt :│  lit     │     terminal            │
-│  sauvegarde atomique          │          │                         │
-└───────────────────────────────┘          └─────────────────────────┘
-   lancé par systemd --user                  appelé depuis ~/.bashrc
-Le démon (tracker) interroge le serveur X toutes les secondes pour savoir quelle fenêtre a le focus. Il lit la propriété _NET_ACTIVE_WINDOW de la fenêtre racine, puis _NET_WM_PID de cette fenêtre, et retrouve le nom du processus dans /proc/<pid>/comm.
-Il accumule les secondes par nom d'application et sauvegarde la table toutes les 60 secondes, ainsi qu'à l'arrêt (SIGTERM / SIGINT). Les secondes s'additionnent d'un lancement à l'autre.
-Le client (tracker-ui) ne dépend pas d'X11 : il lit simplement le fichier de données.
-Prérequis
-Élément	Détail
-Système	Linux (développé sous Ubuntu)
-Session graphique	X11 (Xorg). Wayland n'est pas supporté, voir Limites connues
-Compilateur	gcc (C11), make
-Bibliothèque	libx11-dev (démon uniquement)
-Tests	valgrind
-Service	systemd (mode --user)
-bash
+- [Fonctionnement](#fonctionnement)
+- [Prérequis](#prérequis)
+- [Compilation et tests](#compilation-et-tests)
+- [Installation comme service](#installation-comme-service)
+- [Afficher les statistiques à l’ouverture du terminal](#afficher-les-statistiques-à-louverture-du-terminal)
+- [Utilisation](#utilisation)
+- [Configuration et données](#configuration-et-données)
+- [Architecture](#architecture)
+- [Format du fichier de données](#format-du-fichier-de-données)
+- [Principes de conception](#principes-de-conception)
+- [Dépannage](#dépannage)
+- [Limites connues](#limites-connues)
+- [Pistes d’évolution](#pistes-dévolution)
+
+## Fonctionnement
+
+Le projet se compose de deux programmes indépendants qui échangent par un fichier de données :
+
+```mermaid
+flowchart LR
+    subgraph daemon["Démon : tracker (chaque seconde)"]
+        x11["Fenêtre X11 active"] --> pid["PID de la fenêtre"]
+        pid --> proc["Nom du processus via /proc"]
+        proc --> stats["Ajout du temps aux statistiques"]
+    end
+    stats -->|"Sauvegarde toutes les 60 s et à l’arrêt"| file[("stats.dat")]
+    file -->|"Lecture à la demande"| ui["Client : tracker-ui"]
+    ui --> sort["Tri et calcul des durées"]
+    sort --> bars["Jauges adaptées au terminal"]
+```
+
+- **`tracker`** interroge X11 chaque seconde pour identifier la fenêtre au premier plan. Il récupère son PID, lit son nom dans `/proc/<pid>/comm` et comptabilise le temps par application.
+- Les statistiques sont sauvegardées toutes les 60 secondes et à l’arrêt normal du démon (`SIGTERM` ou `SIGINT`). Elles sont conservées entre les lancements.
+- **`tracker-ui`** lit le fichier de données et affiche les statistiques sous forme de jauges. Il ne dépend pas de X11.
+
+## Prérequis
+
+| Élément | Prérequis |
+| --- | --- |
+| Système | Linux (développé sous Ubuntu) |
+| Session graphique | X11 / Xorg |
+| Compilation | GCC compatible C11 et GNU Make |
+| Bibliothèque | Xlib (`libx11-dev`), nécessaire au démon uniquement |
+| Tests | Valgrind |
+| Service utilisateur | systemd |
+
+Sur Debian ou Ubuntu, installez les outils nécessaires :
+
+```bash
 sudo apt install build-essential libx11-dev valgrind gdb
+```
 
-Pour vérifier que tu es bien sous X11 :
+Vérifiez que la session utilise X11 :
 
-bash
-echo $XDG_SESSION_TYPE      # doit afficher "x11"
+```bash
+echo "$XDG_SESSION_TYPE"  # doit afficher x11
+```
 
-Sous Ubuntu, choisis « Ubuntu sur Xorg » via la roue crantée de l'écran de connexion si besoin.
+Si nécessaire, sélectionnez **Ubuntu sur Xorg** depuis l’écran de connexion.
 
-Compilation et tests
-bash
-make            # compile build/tracker (démon) et build/tracker-ui (client)
-make test       # compile les tests et les lance sous valgrind
-make run        # compile puis lance le démon au premier plan
-make clean      # supprime le dossier build/
+## Compilation et tests
 
-Les tests sont dans tests/ : un exécutable par module, avec des assert. make test les exécute sous valgrind --leak-check=full : un test échoue aussi s'il y a une fuite mémoire ou une erreur d'accès.
+Depuis la racine du dépôt :
 
-stats : OK
-storage : OK
-paths : OK
-render : OK
-Tous les tests passent.
+```bash
+make        # compile build/tracker et build/tracker-ui
+make test   # compile les tests et les exécute sous Valgrind
+make run    # compile puis lance le démon au premier plan
+make clean  # supprime le dossier build/
+```
 
-Flags de compilation : -Wall -Wextra -Wpedantic -g -std=c11 -D_POSIX_C_SOURCE=200809L. L'objectif est zéro warning.
+Les tests unitaires sont dans `tests/`. Ils couvrent les statistiques, le stockage, les chemins et le rendu. La cible `make test` échoue en cas d’erreur Valgrind ou de fuite mémoire.
 
-Installation comme service
+Les options de compilation comprennent `-Wall -Wextra -Wpedantic -g -std=c11`. L’objectif est de compiler sans avertissement.
 
-Le démon se lance automatiquement à l'ouverture de ta session graphique grâce à un service systemd utilisateur (aucun sudo nécessaire).
+## Installation comme service
 
-1. Créer le fichier de service
+Le service systemd utilisateur lance le démon à l’ouverture de la session graphique ; aucun `sudo` n’est requis pour ces commandes.
 
-~/.config/systemd/user/timetracker.service (une copie est versionnée dans packaging/) :
+### 1. Créer le fichier de service
 
-ini
+Créez `~/.config/systemd/user/timetracker.service` (un exemple est fourni dans `packaging/timetracker.service`) :
+
+```ini
 [Unit]
 Description=Time tracker (temps passé par application)
 After=graphical-session.target
 PartOf=graphical-session.target
 
 [Service]
-ExecStart=/chemin/absolu/vers/timetracker/build/tracker
+ExecStart=/chemin/absolu/vers/time-tracker-linux-X11/build/tracker
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=graphical-session.target
+```
 
-Adapte ExecStart : le chemin doit être absolu.
+Remplacez `ExecStart` par le chemin absolu vers le binaire `build/tracker` sur votre machine.
 
-2. Vérifier que systemd voit l'écran
+### 2. Vérifier l’environnement graphique
 
-Le démon a besoin de DISPLAY (pour XOpenDisplay) :
+Le démon a besoin de la variable `DISPLAY` pour se connecter à X11 :
 
-bash
+```bash
 systemctl --user show-environment | grep -E 'DISPLAY|XAUTHORITY'
+```
 
-Si ces variables manquent :
+Si ces variables ne sont pas présentes, importez-les :
 
-bash
+```bash
 systemctl --user import-environment DISPLAY XAUTHORITY
-3. Activer et démarrer
-bash
+```
+
+### 3. Activer et démarrer le service
+
+```bash
 systemctl --user daemon-reload
 systemctl --user enable --now timetracker.service
-systemctl --user status timetracker.service     # "active (running)" attendu
-Ce que garantit la configuration
-WantedBy=graphical-session.target : démarrage automatique à chaque ouverture de session.
-Restart=on-failure : si le démon plante, est tué (SIGKILL) ou si X n'est pas encore prêt, systemd le relance après 5 s. Une sortie normale (code 0, par exemple systemctl --user stop) ne le relance pas.
-Affichage à l'ouverture d'un terminal
+systemctl --user status timetracker.service
+```
 
-Ajoute à ~/.bashrc :
+L’état attendu est `active (running)`. `Restart=on-failure` demande à systemd de relancer le démon après une sortie en erreur, avec une attente de cinq secondes.
 
-bash
-# timetracker : résumé à l'ouverture d'un terminal
-if [ -t 1 ] && [ -x /chemin/absolu/vers/timetracker/build/tracker-ui ]; then
-    /chemin/absolu/vers/timetracker/build/tracker-ui
+## Afficher les statistiques à l’ouverture du terminal
+
+Pour afficher le résumé à l’ouverture d’un terminal Bash interactif, ajoutez ceci à `~/.bashrc` en remplaçant le chemin du binaire :
+
+```bash
+# Résumé Time Tracker à l’ouverture d’un terminal interactif
+if [ -t 1 ] && [ -x /chemin/absolu/vers/time-tracker-linux-X11/build/tracker-ui ]; then
+    /chemin/absolu/vers/time-tracker-linux-X11/build/tracker-ui
 fi
-[ -t 1 ] : n'affiche que si la sortie est un vrai terminal (rien dans un scp, un script ou une commande à distance).
-[ -x ... ] : ne casse pas ton shell si le binaire est absent.
+```
 
-Seuls les nouveaux terminaux lisent le fichier à nouveau. Si ton terminal est lancé comme shell de connexion et que rien ne s'affiche, vérifie que ~/.bash_profile ou ~/.profile charge bien ~/.bashrc.
+`[ -t 1 ]` évite l’affichage dans les scripts et les commandes sans terminal. `[ -x ... ]` évite une erreur si le binaire n’existe pas. Si Bash est lancé comme shell de connexion et que le résumé n’apparaît pas, vérifiez que `~/.bash_profile` ou `~/.profile` charge `~/.bashrc`.
 
-Utilisation au quotidien
-bash
-./build/tracker-ui                                    # afficher les stats
+## Utilisation
 
-systemctl --user status timetracker.service           # état du démon
-systemctl --user stop timetracker.service             # arrêt propre (sauvegarde)
+```bash
+./build/tracker-ui
+
+systemctl --user status timetracker.service
+systemctl --user stop timetracker.service      # arrêt propre et sauvegarde
 systemctl --user start timetracker.service
-systemctl --user restart timetracker.service          # à faire après chaque recompilation
+systemctl --user restart timetracker.service    # après recompilation
 
-journalctl --user-unit timetracker.service -n 20 --no-pager   # journal
-cat ~/.local/share/timetracker/stats.dat              # données brutes
+journalctl --user-unit timetracker.service -n 20 --no-pager
+cat "${XDG_DATA_HOME:-$HOME/.local/share}/timetracker/stats.dat"
+```
 
-Après chaque make, redémarre le service : un service actif continue d'exécuter l'ancien binaire chargé en mémoire.
+Après recompilation, redémarrez le service : un processus déjà lancé continue d’utiliser l’ancien binaire chargé en mémoire. Ne lancez pas `./build/tracker` manuellement pendant que le service tourne : les deux démons écriraient dans le même fichier.
 
-Ne lance pas ./build/tracker à la main pendant que le service tourne : les deux processus écriraient dans le même fichier.
+Le client affiche l’état de la dernière sauvegarde. Les chiffres peuvent donc avoir jusqu’à une minute de retard.
 
-Le client affiche l'état du dernier enregistrement : le démon écrit toutes les 60 s, les chiffres peuvent donc avoir jusqu'à une minute de retard.
+## Configuration et données
 
-Configuration
+Le projet ne possède pas de fichier de configuration. Les réglages sont définis dans le code ; après modification, recompilez et redémarrez le démon si nécessaire.
 
-Il n'y a pas de fichier de configuration : les réglages sont des constantes en tête de fichier. Après modification, recompile (et redémarre le service pour le démon).
+| Constante | Fichier | Rôle | Valeur par défaut |
+| --- | --- | --- | --- |
+| `SAVE_INTERVAL` | `src/daemon_main.c` | Intervalle entre les sauvegardes périodiques | `60u` secondes |
+| `MIN_PERCENT` | `src/render.c` | Pourcentage minimal affiché | `1` % |
+| `MAX_BAR` | `src/render.c` | Largeur maximale d’une jauge | `50` colonnes |
+| `MIN_BAR` | `src/render.c` | Largeur minimale d’une jauge | `10` colonnes |
+| `MIN_WIDTH` | `src/render.c` | Largeur minimale de terminal prise en compte | `40` colonnes |
 
-Constante	Fichier	Rôle	Défaut
-SAVE_INTERVAL	src/daemon_main.c	Secondes entre deux sauvegardes périodiques	60u
-MIN_PERCENT	src/render.c	Les applications sous ce pourcentage ne sont pas affichées (les données restent enregistrées)	1
-MAX_BAR	src/render.c	Largeur maximale d'une jauge, en colonnes	50
-MIN_BAR	src/render.c	Largeur minimale d'une jauge	10
-MIN_WIDTH	src/render.c	Largeur de terminal minimale prise en compte	40
+Les statistiques sont enregistrées dans `$XDG_DATA_HOME/timetracker/stats.dat` si `XDG_DATA_HOME` est défini, sinon dans `~/.local/share/timetracker/stats.dat`. Les répertoires de données sont créés avec les permissions `0700`.
 
-Emplacement des données : $XDG_DATA_HOME/timetracker/stats.dat si XDG_DATA_HOME est défini, sinon ~/.local/share/timetracker/stats.dat. Les dossiers sont créés avec le mode 0700.
+## Architecture
 
-Architecture du code
-timetracker/
+### Organisation des fichiers
+
+```text
+time-tracker-linux-X11/
 ├── Makefile
-├── README.md
+├── Readme.md
 ├── packaging/
-│   └── timetracker.service        # copie du service systemd
+│   └── timetracker.service
 ├── src/
-│   ├── daemon_main.c              # exécutable 1 : le démon (assemblage + signaux)
-│   ├── ui_main.c                  # exécutable 2 : le client terminal
-│   ├── x11_probe.[ch]             # SEUL module qui connaît X11
-│   ├── proc_info.[ch]             # PID → nom du processus (/proc)
-│   ├── stats.[ch]                 # table nom → secondes (type opaque)
-│   ├── storage.[ch]               # sauvegarde / chargement du fichier
-│   ├── paths.[ch]                 # chemin du fichier de données (XDG)
-│   ├── tracker.[ch]               # logique : sonde + stats + persistance
-│   ├── ticker.[ch]                # boucle « une fois par seconde »
-│   └── render.[ch]                # jauges et durées (client)
+│   ├── daemon_main.c       # démon : assemblage, signaux et boucle
+│   ├── ui_main.c           # client terminal
+│   ├── x11_probe.[ch]      # identification de la fenêtre active (X11)
+│   ├── proc_info.[ch]      # lecture du nom du processus dans /proc
+│   ├── stats.[ch]          # table application → secondes
+│   ├── storage.[ch]        # chargement et sauvegarde
+│   ├── paths.[ch]          # chemins XDG
+│   ├── tracker.[ch]        # logique de suivi et persistance
+│   ├── ticker.[ch]         # boucle périodique
+│   └── render.[ch]         # affichage des statistiques
 └── tests/
     ├── test_stats.c
     ├── test_storage.c
     ├── test_paths.c
     └── test_render.c
-Graphe de dépendances
-daemon_main ──► tracker ──► x11_probe        (Xlib)
-     │             ├──────► proc_info        (/proc)
-     │             ├──────► stats
-     │             └──────► storage ──► stats
-     ├──────────► ticker
-     └──────────► paths
+```
 
-ui_main ──► paths
-        ├─► storage ──► stats
-        └─► render  ──► stats
+### Dépendances entre modules
 
-Les dépendances vont toujours dans un seul sens, sans cycle. tracker-ui n'est pas lié à libX11.
+```mermaid
+flowchart TD
+    daemon_main --> tracker
+    daemon_main --> ticker
+    daemon_main --> paths
+    tracker --> x11_probe
+    tracker --> proc_info
+    tracker --> stats
+    tracker --> storage
+    storage --> stats
+    ui_main --> paths
+    ui_main --> storage
+    ui_main --> render
+    render --> stats
+```
 
-Les modules
-Module	Responsabilité	Points notables
-x11_probe	Retourne le PID de la fenêtre active (_NET_ACTIVE_WINDOW, puis _NET_WM_PID)	Type opaque, create/destroy. Retourne 1 (et non une erreur) quand il n'y a pas de fenêtre active ou pas de PID
-proc_info	Lit /proc/<pid>/comm	Le buffer est fourni par l'appelant, aucune allocation. Nom limité à 15 caractères par le noyau
-stats	Table nom → secondes	Tableau dynamique (realloc ×2), noms copiés et possédés par la table, type opaque
-storage	Sauvegarde / chargement	Écriture atomique (.tmp puis rename), fclose vérifié, lignes mal formées ignorées
-paths	Calcule et crée le dossier de données	Respecte XDG_DATA_HOME, mkdir niveau par niveau
-tracker	Orchestre sonde, statistiques et persistance	Aucun printf : un module de logique n'affiche rien
-ticker	Appelle un callback chaque seconde	ticker_run (N fois) et ticker_run_until (jusqu'à un drapeau de signal), pattern callback + userdata
-render	Trie, calcule les jauges, formate les durées	Pur : écrit dans un FILE *, donc testable avec open_memstream
-daemon_main	Installe les handlers SIGINT/SIGTERM, charge, boucle, sauvegarde	Le handler ne fait que lever un drapeau volatile sig_atomic_t
-ui_main	Lit le fichier, détecte la largeur (ioctl(TIOCGWINSZ)), appelle render	80 colonnes par défaut si la sortie n'est pas un terminal
-Cycle de vie du démon
-paths_stats_file → install_handlers → tracker_create → tracker_load
-        → ticker_run_until(&g_stop, on_tick, &app)
-              └─ chaque seconde : tracker_tick
-                 chaque 60 ticks : tracker_save
-        (SIGTERM / SIGINT : g_stop = 1, la boucle sort en < 1 s)
-        → tracker_save → tracker_destroy
-Format du fichier de données
+Les dépendances vont dans un seul sens, sans cycle. Seul le démon est lié à Xlib ; `tracker-ui` peut fonctionner sans serveur X11.
 
-Texte brut, un enregistrement par ligne : <secondes><TAB><nom>.
+### Responsabilités principales
 
-2228    brave
-1592    wezterm-gui
-993     systemsettings
-Lisible avec cat, modifiable à la main.
-Les lignes mal formées sont ignorées au chargement.
-Les secondes s'ajoutent à celles déjà en mémoire : recharger un fichier ne remplace rien.
-L'écriture est atomique : le fichier est d'abord écrit dans stats.dat.tmp, puis renommé. Si le processus est tué en pleine écriture, l'ancien fichier reste intact.
-Principes de conception
+| Module | Responsabilité |
+| --- | --- |
+| `x11_probe` | Récupère le PID de la fenêtre active via `_NET_ACTIVE_WINDOW` et `_NET_WM_PID`. L’absence de fenêtre active est un cas normal. |
+| `proc_info` | Lit `/proc/<pid>/comm` dans un tampon fourni par l’appelant. Le noyau limite ce nom à 15 caractères. |
+| `stats` | Gère la table dynamique des applications et de leur durée. |
+| `storage` | Charge et sauvegarde les statistiques ; l’écriture est atomique via un fichier temporaire puis `rename`. |
+| `paths` | Détermine le chemin XDG et crée les répertoires nécessaires. |
+| `tracker` | Coordonne la sonde, les statistiques et la persistance, sans afficher de sortie. |
+| `ticker` | Exécute un callback périodique, notamment jusqu’à la réception d’un signal d’arrêt. |
+| `render` | Trie les statistiques, calcule les jauges et formate les durées. Écrit dans un `FILE *`. |
+| `daemon_main` | Installe les gestionnaires `SIGINT`/`SIGTERM`, charge les données, démarre la boucle et sauvegarde à l’arrêt. |
+| `ui_main` | Charge les données, détecte la largeur du terminal et appelle le rendu. |
 
-Le projet suit quelques règles, appliquées module par module :
+### Cycle de vie du démon
 
-Un module = un .h (le contrat) + un .c (l'implémentation). Tout ce qui n'est pas public est static.
-Types opaques (stats_t, x11_probe_t, tracker_t) : le header ne montre pas la structure, on passe par des fonctions.
-Propriété de la mémoire explicite : tout xxx_create() a son xxx_destroy() (qui accepte NULL), et la documentation dit qui libère quoi.
-Pas de variable globale (hormis le drapeau de signal, obligatoire) : l'état passe en paramètre, via void *userdata dans les callbacks.
-Erreurs par valeur de retour (0 / -1, errno positionné), jamais de exit() dans un module. Les cas normaux (pas de fenêtre active) ne sont pas des erreurs.
-Libération sur tous les chemins d'erreur, dans l'ordre inverse de l'acquisition.
-Isolation de X11 dans un seul module : porter le projet vers Wayland ne toucherait que x11_probe.
-Chaque module a son test, exécuté sous valgrind.
+```text
+Calcul du chemin des données
+  → installation des gestionnaires de signaux
+  → création du tracker et chargement des statistiques
+  → boucle : à chaque seconde, mise à jour de l’application active
+  → sauvegarde périodique toutes les 60 secondes
+  → SIGTERM ou SIGINT : sortie de boucle, sauvegarde finale et libération
+```
 
-Concepts C couverts, par module : pointeurs de fonction et userdata (ticker), parsing de /proc et errno (proc_info), malloc/realloc/free (stats), E/S fichiers et écriture atomique (storage), Xlib et mémoire côté serveur (x11_probe), signaux et sigaction (daemon_main), qsort et UTF-8 (render), ioctl (ui_main), unités systemd (packaging/).
+## Format du fichier de données
 
-Dépannage
-Symptôme	Cause probable	Solution
-make ne produit rien dans build/tracker	La cible par défaut n'est pas all	Utiliser le Makefile fourni (.DEFAULT_GOAL := all)
-*** missing separator	Des espaces au lieu d'une tabulation devant les commandes du Makefile	Remplacer par de vraies tabulations
-No rule to make target 'build/ui_main.o'	src/ui_main.c absent	Vérifier ls src/
-structure sigaction inconnue	Macro POSIX manquante	-D_POSIX_C_SOURCE=200809L dans CFLAGS, avant tout #include
-undefined reference to 'XOpenDisplay'	-lX11 manquant à l'édition de liens	Vérifier LDLIBS et son usage dans la règle du démon
-Le démon affiche creation tracker et s'arrête	Pas de serveur X joignable (DISPLAY absent, session Wayland)	echo $DISPLAY, echo $XDG_SESSION_TYPE, systemctl --user import-environment DISPLAY XAUTHORITY
-Les chiffres du client ne bougent pas	Le service est arrêté, ou l'écriture périodique n'a pas encore eu lieu	systemctl --user status timetracker.service, patienter 60 s
-Le comportement ne change pas après un make	Le service exécute l'ancien binaire	systemctl --user restart timetracker.service
-Le service échoue après un make clean	Le binaire build/tracker n'existe plus	Relancer make, puis restart
-journalctl --user -u ... : « No journal files »	Le journal utilisateur n'est pas lisible	journalctl --user-unit timetracker.service
-Rien ne s'affiche à l'ouverture d'un terminal	~/.bashrc non lu ou binaire absent	bash -i pour tester, ls -l build/tracker-ui, charger .bashrc depuis .profile
-Limites connues
-X11 uniquement. Wayland interdit volontairement à un programme de demander quelle fenêtre a le focus. Sous GNOME/Wayland, il faudrait une extension du shell ou D-Bus, et seul x11_probe serait à réécrire.
-Noms tronqués à 15 caractères : /proc/<pid>/comm est limité par le noyau (gnome-terminal-server devient gnome-terminal-).
-Applications sans _NET_WM_PID : certaines applications (sandbox Snap/Flatpak notamment) n'exposent pas leur PID et ne sont pas comptées.
-Pas de détection d'inactivité : le temps passé devant un écran verrouillé ou loin de l'ordinateur est compté tant qu'une fenêtre a le focus.
-Fenêtre fermée entre deux requêtes : X renvoie BadWindow, et le gestionnaire d'erreurs par défaut de Xlib termine le programme. C'est rare, et Restart=on-failure relance le démon, mais l'erreur n'est pas encore interceptée (XSetErrorHandler).
-Pas de verrou : deux démons simultanés écriraient dans le même fichier.
-Retard d'affichage jusqu'à 60 s (écriture périodique), et jusqu'à 60 s de données perdues sur un SIGKILL ou une coupure de courant.
-Noms contenant une tabulation ou un saut de ligne casseraient le format du fichier. Les noms viennent de /proc/<pid>/comm, donc c'est improbable.
-Lignes de plus de 255 caractères dans le fichier : tronquées par fgets (impossible avec des noms de 15 caractères).
-Un tick = une seconde : l'horloge est un sleep(1), sans correction de dérive.
-Pistes d'évolution
-[ ] make install : copier les binaires dans ~/.local/bin et ne plus dépendre du dossier de développement
-[ ] Verrou (flock) pour garantir un seul démon
-[ ] Socket Unix (socket, bind, listen, accept) : chiffres en direct au lieu d'un fichier
-[ ] Détection d'inactivité (extension XScreenSaver)
-[ ] XSetErrorHandler pour survivre à BadWindow
-[ ] Statistiques par jour (un fichier par date) et remise à zéro
-[ ] Horloge monotone (clock_gettime) à la place de sleep(1)
-[ ] Mesure du temps réel écoulé entre ticks
-[ ] Support Wayland (nouveau module à la place de x11_probe)
+Le fichier est du texte brut, avec un enregistrement par ligne au format `<secondes><TAB><nom>` :
 
-                                                Licence
-Diego DELVIG, diegodvg@tutamail.com
+```text
+2228<TAB>brave
+1592<TAB>wezterm-gui
+993<TAB>systemsettings
+```
+
+Le fichier peut être consulté avec `cat` et modifié manuellement. Les lignes mal formées sont ignorées au chargement ; les durées chargées s’ajoutent aux valeurs déjà présentes en mémoire.
+
+La sauvegarde est atomique : le contenu est écrit dans `stats.dat.tmp`, puis le fichier temporaire est renommé en `stats.dat`. Une interruption pendant l’écriture laisse ainsi l’ancienne sauvegarde intacte.
+
+## Principes de conception
+
+- Un module correspond à un contrat `.h` et une implémentation `.c` ; les fonctions internes restent privées (`static`).
+- Les structures principales sont opaques et manipulées via des fonctions dédiées.
+- La propriété mémoire est explicite : les ressources créées ont une fonction de destruction correspondante, qui accepte `NULL`.
+- L’état passe par les paramètres ; seul le drapeau de signal est global, conformément à l’usage de `sig_atomic_t`.
+- Les erreurs sont signalées par les valeurs de retour et `errno`, sans appeler `exit()` depuis les modules.
+- Les ressources sont libérées sur les chemins d’erreur.
+- X11 est isolé dans `x11_probe`, et chaque module testable possède un test unitaire.
+
+## Dépannage
+
+| Symptôme | Cause probable | Vérification ou solution |
+| --- | --- | --- |
+| `make` ne crée pas les exécutables | Compilation interrompue ou outils manquants | Vérifiez la sortie de `make`, puis installez GCC, Make et `libx11-dev`. |
+| `*** missing separator` | Espaces au lieu d’une tabulation dans le Makefile | Utilisez une vraie tabulation pour les commandes Make. |
+| `undefined reference to XOpenDisplay` | Bibliothèque X11 absente à l’édition de liens | Vérifiez que `libx11-dev` est installé et que le lien du démon utilise `-lX11`. |
+| Le démon ne peut pas se connecter à X | `DISPLAY` absent, ou session Wayland | Vérifiez `echo "$DISPLAY"` et `echo "$XDG_SESSION_TYPE"`, puis importez `DISPLAY` dans l’environnement systemd utilisateur. |
+| Les chiffres ne changent pas | Service arrêté ou sauvegarde périodique pas encore effectuée | Vérifiez `systemctl --user status timetracker.service` et patientez jusqu’à 60 secondes. |
+| Le comportement ne change pas après `make` | Le service utilise encore le binaire chargé précédemment | Exécutez `systemctl --user restart timetracker.service`. |
+| Le service échoue après `make clean` | Le binaire a été supprimé | Relancez `make`, puis redémarrez le service. |
+| Rien ne s’affiche à l’ouverture d’un terminal | `~/.bashrc` n’est pas chargé ou le binaire est absent | Vérifiez le bloc dans `~/.bashrc`, le chemin et les permissions du binaire. |
+
+## Limites connues
+
+- **X11 uniquement :** Wayland ne permet pas à une application ordinaire d’identifier la fenêtre active. Une intégration Wayland nécessiterait une autre approche, par exemple une extension du shell ou D-Bus.
+- **Noms de processus limités :** `/proc/<pid>/comm` est limité à 15 caractères par le noyau.
+- **Certaines applications ne sont pas comptées :** leur fenêtre peut ne pas exposer `_NET_WM_PID`, notamment dans certains environnements sandboxés.
+- **Pas de détection d’inactivité :** le temps continue d’être compté lorsqu’une fenêtre garde le focus, même si l’utilisateur est absent ou que l’écran est verrouillé.
+- **Pas de verrou inter-processus :** deux démons lancés en même temps peuvent écrire dans le même fichier.
+- **Retard et perte possibles :** l’affichage peut avoir jusqu’à 60 secondes de retard ; une terminaison forcée peut faire perdre les données depuis la dernière sauvegarde.
+- **Horloge approximative :** un tick repose sur `sleep(1)` et ne corrige pas la dérive.
+
+## Pistes d’évolution
+
+- [ ] Ajouter `make install` pour installer les binaires dans `~/.local/bin`.
+- [ ] Ajouter un verrou (`flock`) pour empêcher plusieurs démons simultanés.
+- [ ] Remplacer le fichier par une socket Unix pour obtenir des statistiques en direct.
+- [ ] Ajouter la détection d’inactivité.
+- [ ] Mieux gérer les erreurs X11 liées aux fenêtres qui disparaissent.
+- [ ] Ajouter des statistiques par jour et une remise à zéro.
+- [ ] Utiliser une horloge monotone et mesurer le temps réel écoulé entre les ticks.
+- [ ] Étudier une intégration Wayland.
+
+---
+
+Auteur : Diego DELVIG — diegodvg@tutamail.com
